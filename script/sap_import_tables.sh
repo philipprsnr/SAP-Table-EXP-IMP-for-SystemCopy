@@ -19,9 +19,24 @@
 # Version 1.8.5 - OMIQ Template, Correction OAC0 Template
 # Version 1.8.6 - Correct OAC0 Template
 # Version 1.8.7 - Robust handling improvements
+# Version 1.9 - Manual custom table selection
 
 # set config file and delete old one
 export exportedtables="$EXPIMPLOC/exported_tables.conf"
+export customtablemap="$EXPIMPLOC/custom_table_map.conf"
+
+get_custom_display_name() {
+  local identifier="$1"
+  local display="$identifier"
+  if [ -s "$customtablemap" ]; then
+    local map_line
+    map_line=$(grep -F "^$identifier|" "$customtablemap" 2>/dev/null | head -n 1)
+    if [ -n "$map_line" ]; then
+      display=${map_line#*|}
+    fi
+  fi
+  printf '%s' "$display"
+}
 if [ ! -s "$exportedtables" ]
  then
         echo "ERROR: no exports found for import" >> "$EXPIMPLOGFILE"
@@ -78,7 +93,13 @@ while IFS= read -r IMPORTEDTABLES_LINE
 do
   [ -z "$IMPORTEDTABLES_LINE" ] && continue
   table_name=${IMPORTEDTABLES_LINE%%|*}
-  IMPORTEDTABLES+=("$table_name" "$table_name" "on")
+  display_name=$(get_custom_display_name "$table_name")
+  if [ "$display_name" != "$table_name" ]; then
+    display_label="$display_name (custom)"
+  else
+    display_label="$display_name"
+  fi
+  IMPORTEDTABLES+=("$table_name" "$display_label" "on")
 done < "$exportedtablesok"
 
 if ! dialog --title "$global_title" --backtitle "$global_backtitle" --separate-output --checklist "Select the exports to import:" $global_height $global_width $global_list "${IMPORTEDTABLES[@]}" 2> "$importtables"
@@ -147,16 +168,34 @@ import_error=0
 while IFS= read -r SELTABLES
  do
   [ -z "$SELTABLES" ] && continue
-  printf '=== Import START %s ===\n' "$SELTABLES" >> "$progress_log"
+  display_name=$(get_custom_display_name "$SELTABLES")
+  if [ "$display_name" != "$SELTABLES" ]; then
+    progress_label="$display_name (custom)"
+  else
+    progress_label="$display_name"
+  fi
+  printf '=== Import START %s ===\n' "$progress_label" >> "$progress_log"
   R3trans -w "$EXPIMPLOC/$SELTABLES.imp.log" -i "$EXPIMPLOC/$SELTABLES.dat"
   rc=$?
   printf '%s|RC=%s\n' "$SELTABLES" "$rc" >> "$importedtables"
   if [ "$rc" -ne 0 ] && [ "$rc" -ne 4 ]; then
     import_error=1
   fi
-  printf '=== Import END %s ===\n\n' "$SELTABLES" >> "$progress_log"
+  printf '=== Import END %s ===\n\n' "$progress_label" >> "$progress_log"
   sleep 1
  done < "$importtables"
+
+if [ -s "$customtablemap" ]
+ then
+  {
+    printf '# Custom table mapping (file id -> table name)\n'
+    while IFS='|' read -r map_id map_table
+     do
+      [ -z "$map_id" ] && continue
+      printf '# %s -> %s\n' "$map_id" "$map_table"
+    done < "$customtablemap"
+  } >> "$importedtables"
+fi
 printf '# =====================================\n' >> "$importedtables"
 
 cleanup_progress
