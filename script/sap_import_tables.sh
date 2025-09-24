@@ -25,6 +25,67 @@
 export exportedtables="$EXPIMPLOC/exported_tables.conf"
 export customtablemap="$EXPIMPLOC/custom_table_map.conf"
 
+ensure_dialog_dimensions() {
+  local term_height term_width usable_height usable_width list_height
+
+  term_height=$(tput lines 2>/dev/null || echo 0)
+  term_width=$(tput cols 2>/dev/null || echo 0)
+
+  if [ "$term_height" -gt 0 ]; then
+    usable_height=$((term_height - 4))
+    if [ "$usable_height" -lt 18 ]; then
+      usable_height=$((term_height - 2))
+    fi
+    if [ "$usable_height" -lt 14 ]; then
+      usable_height=14
+    fi
+    if [ "$usable_height" -gt 60 ]; then
+      usable_height=60
+    fi
+    if [ "$usable_height" -ge "$term_height" ]; then
+      usable_height=$((term_height - 1))
+    fi
+  else
+    usable_height=${global_height:-25}
+  fi
+
+  if [ "$term_width" -gt 0 ]; then
+    usable_width=$((term_width - 4))
+    if [ "$usable_width" -lt 70 ]; then
+      usable_width=$((term_width - 2))
+    fi
+    if [ "$usable_width" -lt 50 ]; then
+      if [ "$term_width" -gt 4 ]; then
+        usable_width=$((term_width - 2))
+      else
+        usable_width=50
+      fi
+    fi
+    if [ "$usable_width" -gt 120 ]; then
+      usable_width=120
+    fi
+    if [ "$usable_width" -le 0 ]; then
+      usable_width=50
+    fi
+  else
+    usable_width=${global_width:-80}
+  fi
+
+  export global_height=$usable_height
+  export global_width=$usable_width
+
+  list_height=$((global_height - 12))
+  if [ "$list_height" -gt 35 ]; then
+    list_height=35
+  fi
+  if [ "$list_height" -lt 8 ]; then
+    list_height=8
+  fi
+  export global_list=$list_height
+}
+
+ensure_dialog_dimensions
+
 get_custom_display_name() {
   local identifier="$1"
   local display="$identifier"
@@ -49,6 +110,7 @@ export exportedtablesok="$EXPIMPLOC/exported_tables_ok.conf"
 # check existing data
 if [ -e "$exportedtablesok" ]
  then
+        ensure_dialog_dimensions
         dialog --title "$global_title" --backtitle "$global_backtitle"  --yes-label "Continue" --no-label "Exit" --yesno  "There are import files in $EXPIMPLOC\nIf you continue these files will be deleted!" $global_height $global_width
         CONTINUE=$?
         case $CONTINUE in
@@ -102,6 +164,7 @@ do
   IMPORTEDTABLES+=("$table_name" "$display_label" "on")
 done < "$exportedtablesok"
 
+ensure_dialog_dimensions
 if ! dialog --title "$global_title" --backtitle "$global_backtitle" --separate-output --checklist "Select the exports to import:" $global_height $global_width $global_list "${IMPORTEDTABLES[@]}" 2> "$importtables"
  then
         echo "ERROR: import select error" >> "$EXPIMPLOGFILE"
@@ -144,6 +207,16 @@ fi
 progress_pid=""
 cleanup_progress() {
   if [ -n "$progress_pid" ]; then
+    if command -v pgrep >/dev/null 2>&1; then
+      while IFS= read -r child_pid; do
+        [ -n "$child_pid" ] && kill "$child_pid" 2>/dev/null
+      done < <(pgrep -P "$progress_pid" 2>/dev/null)
+    else
+      while IFS= read -r child_pid; do
+        child_pid=${child_pid##*[[:space:]]}
+        [ -n "$child_pid" ] && kill "$child_pid" 2>/dev/null
+      done < <(ps -eo pid=,ppid= 2>/dev/null | awk -v p="$progress_pid" '$2 == p { print $1 }')
+    fi
     kill "$progress_pid" 2>/dev/null
     wait "$progress_pid" 2>/dev/null
     progress_pid=""
@@ -151,9 +224,11 @@ cleanup_progress() {
   rm -f -- "$progress_log"
 }
 trap cleanup_progress EXIT
+ensure_dialog_dimensions
 (
   trap 'exit 0' TERM
   while true; do
+    ensure_dialog_dimensions
     tail -n +1 -f "$progress_log" | dialog --title "$global_title" --backtitle "$global_backtitle" --progressbox "Import selected tables"  $global_height $global_width
     status=$?
     if [ "$status" -eq 3 ]; then
@@ -207,6 +282,7 @@ cat "$importedtables" >> "$EXPIMPLOGFILE"
 echo "=== imported tables ===" >> "$EXPIMPLOGFILE"
 
 # import info
+ensure_dialog_dimensions
 if ! dialog --title "$global_title" --backtitle "$global_backtitle" --exit-label "Continue" --textbox "$importedtables" $global_height $global_width
  then
         echo "ERROR: import info error" >> "$EXPIMPLOGFILE"

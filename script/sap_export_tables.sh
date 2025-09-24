@@ -27,6 +27,67 @@ export exportedtables="$EXPIMPLOC/exported_tables.conf"
 export customtables="$EXPIMPLOC/custom_tables_manual.conf"
 export customtablemap="$EXPIMPLOC/custom_table_map.conf"
 
+ensure_dialog_dimensions() {
+  local term_height term_width usable_height usable_width list_height
+
+  term_height=$(tput lines 2>/dev/null || echo 0)
+  term_width=$(tput cols 2>/dev/null || echo 0)
+
+  if [ "$term_height" -gt 0 ]; then
+    usable_height=$((term_height - 4))
+    if [ "$usable_height" -lt 18 ]; then
+      usable_height=$((term_height - 2))
+    fi
+    if [ "$usable_height" -lt 14 ]; then
+      usable_height=14
+    fi
+    if [ "$usable_height" -gt 60 ]; then
+      usable_height=60
+    fi
+    if [ "$usable_height" -ge "$term_height" ]; then
+      usable_height=$((term_height - 1))
+    fi
+  else
+    usable_height=${global_height:-25}
+  fi
+
+  if [ "$term_width" -gt 0 ]; then
+    usable_width=$((term_width - 4))
+    if [ "$usable_width" -lt 70 ]; then
+      usable_width=$((term_width - 2))
+    fi
+    if [ "$usable_width" -lt 50 ]; then
+      if [ "$term_width" -gt 4 ]; then
+        usable_width=$((term_width - 2))
+      else
+        usable_width=50
+      fi
+    fi
+    if [ "$usable_width" -gt 120 ]; then
+      usable_width=120
+    fi
+    if [ "$usable_width" -le 0 ]; then
+      usable_width=50
+    fi
+  else
+    usable_width=${global_width:-80}
+  fi
+
+  export global_height=$usable_height
+  export global_width=$usable_width
+
+  list_height=$((global_height - 12))
+  if [ "$list_height" -gt 35 ]; then
+    list_height=35
+  fi
+  if [ "$list_height" -lt 8 ]; then
+    list_height=8
+  fi
+  export global_list=$list_height
+}
+
+ensure_dialog_dimensions
+
 sanitize_table_name() {
   local input="$1"
   input=$(printf '%s' "$input" | tr '[:lower:]' '[:upper:]')
@@ -56,6 +117,7 @@ generate_custom_identifier() {
 }
 
 prompt_custom_tables() {
+  ensure_dialog_dimensions
   rm -f -- "$customtables" "$customtablemap"
   local tmp_input
   if command -v mktemp >/dev/null 2>&1; then
@@ -66,6 +128,7 @@ prompt_custom_tables() {
   local -a table_list=()
   local rc raw_input sanitized_input duplicate existing
   while true; do
+    ensure_dialog_dimensions
     if ! dialog --title "$global_title" --backtitle "$global_backtitle" --ok-label "Add" --cancel-label "Finish" \
         --inputbox "Enter an additional table name to export/import.\n\nLeave empty and press Add to finish or press Finish to stop adding tables." \
         $global_height $global_width 2> "$tmp_input"; then
@@ -88,6 +151,7 @@ prompt_custom_tables() {
       break
     fi
     if ! printf '%s\n' "$sanitized_input" | grep -Eq '^[A-Z0-9_/$#]+$'; then
+      ensure_dialog_dimensions
       dialog --title "$global_title" --backtitle "$global_backtitle" --msgbox "Table name $sanitized_input contains unsupported characters.\nOnly A-Z, 0-9, _, /, $ and # are allowed." 0 0
       continue
     fi
@@ -99,6 +163,7 @@ prompt_custom_tables() {
       fi
     done
     if [ "$duplicate" -eq 1 ]; then
+      ensure_dialog_dimensions
       dialog --title "$global_title" --backtitle "$global_backtitle" --msgbox "Table $sanitized_input already added." 0 0
       continue
     fi
@@ -116,6 +181,7 @@ prompt_custom_tables() {
 # check existing data
 if [ -e "$selectedtablesforexport" ]
  then
+        ensure_dialog_dimensions
         dialog --title "$global_title" --backtitle "$global_backtitle"  --yes-label "Continue" --no-label "Exit" --yesno  "There are export files in $EXPIMPLOC\nIf you continue these files will be deleted!" $global_height $global_width
         CONTINUE=$?
         case $CONTINUE in
@@ -147,6 +213,7 @@ if [ ${#template_options[@]} -eq 0 ]; then
     exit 11
 fi
 
+ensure_dialog_dimensions
 if ! dialog --title "$global_title" --backtitle "$global_backtitle" --separate-output --checklist "Select the Templates for Export:" $global_height $global_width $global_list "${template_options[@]}" 2> "$selectedtablesforexport"
  then
     echo "ERROR: fail to select templates for export" >> "$EXPIMPLOGFILE"
@@ -216,6 +283,16 @@ fi
 progress_pid=""
 cleanup_progress() {
   if [ -n "$progress_pid" ]; then
+    if command -v pgrep >/dev/null 2>&1; then
+      while IFS= read -r child_pid; do
+        [ -n "$child_pid" ] && kill "$child_pid" 2>/dev/null
+      done < <(pgrep -P "$progress_pid" 2>/dev/null)
+    else
+      while IFS= read -r child_pid; do
+        child_pid=${child_pid##*[[:space:]]}
+        [ -n "$child_pid" ] && kill "$child_pid" 2>/dev/null
+      done < <(ps -eo pid=,ppid= 2>/dev/null | awk -v p="$progress_pid" '$2 == p { print $1 }')
+    fi
     kill "$progress_pid" 2>/dev/null
     wait "$progress_pid" 2>/dev/null
     progress_pid=""
@@ -223,9 +300,11 @@ cleanup_progress() {
   rm -f -- "$progress_log"
 }
 trap cleanup_progress EXIT
+ensure_dialog_dimensions
 (
   trap 'exit 0' TERM
   while true; do
+    ensure_dialog_dimensions
     tail -n +1 -f "$progress_log" | dialog --title "$global_title" --backtitle "$global_backtitle" --progressbox "Export SAP Tables"  $global_height $global_width
     status=$?
     if [ "$status" -eq 3 ]; then
@@ -314,6 +393,7 @@ cat "$exportedtables" >> "$EXPIMPLOGFILE"
 echo "=== exported tables ===" >> "$EXPIMPLOGFILE"
 
 # export info
+ensure_dialog_dimensions
 if ! dialog --title "$global_title" --backtitle "$global_backtitle" --exit-label "Continue" --textbox "$exportedtables" $global_height $global_width
  then
         echo "ERROR: export info error" >> "$EXPIMPLOGFILE"
