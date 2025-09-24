@@ -88,7 +88,7 @@ prompt_custom_tables() {
       break
     fi
     if ! printf '%s\n' "$sanitized_input" | grep -Eq '^[A-Z0-9_/$#]+$'; then
-      dialog --title "$global_title" --backtitle "$global_backtitle" --msgbox "Table name $sanitized_input contains unsupported characters.\nOnly A-Z, 0-9, _, /, $ and # are allowed." 8 70
+      dialog --title "$global_title" --backtitle "$global_backtitle" --msgbox "Table name $sanitized_input contains unsupported characters.\nOnly A-Z, 0-9, _, /, $ and # are allowed." 0 0
       continue
     fi
     local duplicate=0
@@ -99,7 +99,7 @@ prompt_custom_tables() {
       fi
     done
     if [ "$duplicate" -eq 1 ]; then
-      dialog --title "$global_title" --backtitle "$global_backtitle" --msgbox "Table $sanitized_input already added." 7 60
+      dialog --title "$global_title" --backtitle "$global_backtitle" --msgbox "Table $sanitized_input already added." 0 0
       continue
     fi
     table_list+=("$sanitized_input")

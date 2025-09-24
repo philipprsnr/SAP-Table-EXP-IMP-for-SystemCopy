@@ -72,12 +72,119 @@ export PARALLEL=0
 
 # set global variables
 export global_pwd=$(pwd)
-export global_height=45
+export global_height=25
 export global_width=80
-export global_list=35
+export global_list=20
 export global_title="SAP Table EXP/IMP for SystemCopy (c) Florian Lamml 2025"
 export global_backtitle="SAP Table EXP/IMP for SystemCopy (c) Florian Lamml 2025"
 export global_copy="(c) Florian Lamml 2025"
+
+wrap_dialog_text() {
+  local text="$1"
+  local wrap_width=$((global_width - 4))
+  if [ "$wrap_width" -lt 10 ]; then
+    wrap_width=10
+  fi
+  printf '%s\n' "$text" | fold -s -w "$wrap_width"
+}
+
+calculate_dialog_dimensions() {
+  local term_height term_width usable_height usable_width list_height
+
+  term_height=$(tput lines 2>/dev/null || echo 0)
+  term_width=$(tput cols 2>/dev/null || echo 0)
+
+  if [ "$term_height" -gt 0 ]; then
+    usable_height=$((term_height - 4))
+    if [ "$usable_height" -lt 18 ]; then
+      usable_height=$((term_height - 2))
+    fi
+    if [ "$usable_height" -lt 14 ]; then
+      usable_height=14
+    fi
+    if [ "$usable_height" -gt 60 ]; then
+      usable_height=60
+    fi
+    if [ "$usable_height" -ge "$term_height" ]; then
+      usable_height=$((term_height - 1))
+    fi
+  else
+    usable_height=25
+  fi
+
+  if [ "$term_width" -gt 0 ]; then
+    usable_width=$((term_width - 4))
+    if [ "$usable_width" -lt 70 ]; then
+      usable_width=$((term_width - 2))
+    fi
+    if [ "$usable_width" -lt 50 ]; then
+      if [ "$term_width" -gt 4 ]; then
+        usable_width=$((term_width - 2))
+      else
+        usable_width=50
+      fi
+    fi
+    if [ "$usable_width" -gt 120 ]; then
+      usable_width=120
+    fi
+    if [ "$usable_width" -le 0 ]; then
+      usable_width=50
+    fi
+  else
+    usable_width=80
+  fi
+
+  export global_height=$usable_height
+  export global_width=$usable_width
+
+  list_height=$((global_height - 12))
+  if [ "$list_height" -gt 35 ]; then
+    list_height=35
+  fi
+  if [ "$list_height" -lt 8 ]; then
+    list_height=8
+  fi
+  export global_list=$list_height
+}
+
+calculate_dialog_dimensions
+
+global_logo=$(cat <<'EOF'
+   _______   ___
+  / __/ _ | / _ \
+ _\ \/ __ |/ ___/
+/___/_/ |_/_/
+ _________   ___  __   ____
+/_  __/ _ | / _ )/ /  / __/
+ / / / __ |/ _  / /__/ _/
+/_/ /_/ |_/_/
+   _____  _____  ______  ______
+  / __/ |/_/ _ \/  _/  |/  / _ \
+ / _/_>  </ ___// // /|_/ / ___/
+/__/_/_/|_/_/  /___/_/  /_/_/
+EOF
+)
+
+build_main_menu_message() {
+  local info_loc info_path client_line os_line
+  info_loc=$(wrap_dialog_text "INFO: $EXPIMPLOCINFO")
+  info_path=$(wrap_dialog_text "INFO: $EXPIMPLOC")
+  client_line=$(wrap_dialog_text "CLIENT: $EXPCLIENT | PARALLEL: $PARALLEL")
+  os_line=$(wrap_dialog_text "OS: $OS | USER: $CURUSER | SAPSYSTEM: $SAPSYSTEMNAME")
+  cat <<EOF
+$global_logo
+
+EXPORT or IMPORT Tables?
+
+$info_loc
+$info_path
+
+$client_line
+$os_line
+
+$global_copy
+EOF
+}
 
 # check export location (and create directory)
 if [ -z "$EXPIMPLOC" ]; 
@@ -148,7 +255,9 @@ chmod u+x "$global_pwd/script/sap_export_tables.sh"
 chmod u+x "$global_pwd/script/sap_import_tables.sh"
 
 # EXPORT or IMPORT dialog
-DIALOG=(dialog --title "$global_title" --backtitle "$global_backtitle"  --radiolist  "   _______   ___ \n  / __/ _ | / _ \ \n _\ \/ __ |/ ___/\n/___/_/ |_/_/    \n _________   ___  __   ____\n/_  __/ _ | / _ )/ /  / __/\n / / / __ |/ _  / /__/ _/  \n/_/ /_/ |_/____/____/___/  \n   _____  _____  ______  ______ \n  / __/ |/_/ _ \/  _/  |/  / _ \ \n / _/_>  </ ___// // /|_/ / ___/\n/___/_/|_/_/  /___/_/  /_/_/    \n\nEXPORT or IMPORT Tables?\n\nINFO: $EXPIMPLOCINFO\nINFO: $EXPIMPLOC \n\nCLIENT: $EXPCLIENT | PARALLEL: $PARALLEL\nOS: $OS | USER: $CURUSER | SAPSYSTEM: $SAPSYSTEMNAME\n\n                                $global_copy" $global_height $global_width 2)
+calculate_dialog_dimensions
+menu_body=$(build_main_menu_message)
+DIALOG=(dialog --title "$global_title" --backtitle "$global_backtitle" --radiolist "$menu_body" $global_height $global_width 2)
 OPTIONS=("EXPORT" "Export SAP Tables" on "IMPORT" "Import SAP Tables" off)
 EXPORIMP=$("${DIALOG[@]}" "${OPTIONS[@]}" 2>&1 >/dev/tty)
 # check ESC hit
@@ -186,7 +295,15 @@ done
 
 # summary
 
-dialog --title "$global_title" --backtitle "$global_backtitle"  --ok-label "EXIT" --msgbox "$EXPIMPRUN$EXPIMPRUNRC\n\nLogfiles can be found in $EXPIMPLOC" $global_height $global_width
+calculate_dialog_dimensions
+summary_text=$(cat <<EOF
+$(wrap_dialog_text "$EXPIMPRUN$EXPIMPRUNRC")
+
+$(wrap_dialog_text "Logfiles can be found in $EXPIMPLOC")
+EOF
+)
+
+dialog --title "$global_title" --backtitle "$global_backtitle" --ok-label "EXIT" --msgbox "$summary_text" $global_height $global_width
 
 # exit
 clear
