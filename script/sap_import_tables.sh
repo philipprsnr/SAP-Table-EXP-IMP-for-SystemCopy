@@ -18,134 +18,168 @@
 # Version 1.8.4 - Correction of OAC0 Template
 # Version 1.8.5 - OMIQ Template, Correction OAC0 Template
 # Version 1.8.6 - Correct OAC0 Template
+# Version 1.8.7 - Robust handling improvements
 
 # set config file and delete old one
-export exportedtables=$EXPIMPLOC/exported_tables.conf
-if [ $(cat $exportedtables | wc -l) -eq 0 ]
- then 
-	echo "ERROR: no exports found for import" >> $EXPIMPLOGFILE
-	exit 20
+export exportedtables="$EXPIMPLOC/exported_tables.conf"
+if [ ! -s "$exportedtables" ]
+ then
+        echo "ERROR: no exports found for import" >> "$EXPIMPLOGFILE"
+        exit 20
 fi
 
 # set config file
-export exportedtablesok=$EXPIMPLOC/exported_tables_ok.conf
+export exportedtablesok="$EXPIMPLOC/exported_tables_ok.conf"
 
 # check existing data
-if [ -e $exportedtablesok ]
+if [ -e "$exportedtablesok" ]
  then
-	dialog --title "$global_title" --backtitle "$global_backtitle"  --yes-label "Continue" --no-label "Exit" --yesno  "There are import files in $EXPIMPLOC\nIf you continue these files will be deleted!" $global_height $global_width 
-	CONTINUE=$?
-	for choice in $CONTINUE
-	do
-		case $choice in
-			0)
-				echo "INFO: delete old files" >> $EXPIMPLOGFILE
-				rm $exportedtablesok
-				;;
-			1)
-				echo "INFO: exit because old run detected" >> $EXPIMPLOGFILE
-				exit 21
-				;;
-			# check ESC hit
-			255)	
-				echo "INFO: exit because old run (ESC hit)" >> $EXPIMPLOGFILE
-				exit 21
-				;;
-		esac
-	done
+        dialog --title "$global_title" --backtitle "$global_backtitle"  --yes-label "Continue" --no-label "Exit" --yesno  "There are import files in $EXPIMPLOC\nIf you continue these files will be deleted!" $global_height $global_width
+        CONTINUE=$?
+        case $CONTINUE in
+                        0)
+                                echo "INFO: delete old files" >> "$EXPIMPLOGFILE"
+                                rm -f -- "$exportedtablesok"
+                                ;;
+                        1|255)
+                                echo "INFO: exit because old run detected" >> "$EXPIMPLOGFILE"
+                                exit 21
+                                ;;
+        esac
 fi
 
 # build list of OK exports for import
-export templist=$EXPIMPLOC/templist.conf
-[ -e $templist ] && rm $templist
-cat $exportedtables | sed -ne '/^[^#].*/p' >> $templist
-cat $templist | grep RC=0 >> $exportedtablesok 
-cat $templist | grep RC=4 >> $exportedtablesok 
-[ -e $templist ] && rm $templist
-if [ $(cat $exportedtablesok | wc -l) -eq 0 ]
- then 
-	echo "ERROR: no OK exports found for import" >> $EXPIMPLOGFILE
-	exit 22
+export templist="$EXPIMPLOC/templist.conf"
+[ -e "$templist" ] && rm -f -- "$templist"
+while IFS= read -r line
+ do
+  case $line in
+    ''|\#*)
+      continue
+      ;;
+  esac
+  printf '%s\n' "$line" >> "$templist"
+done < "$exportedtables"
+grep -E 'RC=(0|4)' "$templist" > "$exportedtablesok"
+[ -e "$templist" ] && rm -f -- "$templist"
+if [ ! -s "$exportedtablesok" ]
+ then
+        echo "ERROR: no OK exports found for import" >> "$EXPIMPLOGFILE"
+        exit 22
 fi
 
 # set config file and delete old one
-export importtables=$EXPIMPLOC/selected_tables_import.conf
-[ -e $importtables ] && rm $importtables
+export importtables="$EXPIMPLOC/selected_tables_import.conf"
+[ -e "$importtables" ] && rm -f -- "$importtables"
 
 # select exports to import
-IMPORTEDTABLESCOUNTER=0
-while read IMPORTEDTABLES
+IMPORTEDTABLES=()
+while IFS= read -r IMPORTEDTABLES_LINE
 do
- IMPORTEDTABLESCOUNTER=$(expr $IMPORTEDTABLESCOUNTER + 1)
- IMPORTEDTABLES=$(echo "$IMPORTEDTABLES" | awk -F\| '{ printf $1}')
- IMPORTEDTABLES[$IMPORTEDTABLESCOUNTER]="$IMPORTEDTABLES $IMPORTEDTABLES on"
-done < $exportedtablesok
+  [ -z "$IMPORTEDTABLES_LINE" ] && continue
+  table_name=${IMPORTEDTABLES_LINE%%|*}
+  IMPORTEDTABLES+=("$table_name" "$table_name" "on")
+done < "$exportedtablesok"
 
-# select exported tables for import
-dialog --title "$global_title" --backtitle "$global_backtitle" --separate-output --checklist "Select the exports to import:" $global_height $global_width $global_list ${IMPORTEDTABLES[@]:1:$IMPORTEDTABLESCOUNTER} 2> $importtables
-if [ $? -ne 0 ]
+if ! dialog --title "$global_title" --backtitle "$global_backtitle" --separate-output --checklist "Select the exports to import:" $global_height $global_width $global_list "${IMPORTEDTABLES[@]}" 2> "$importtables"
  then
-	echo "ERROR: import select error" >> $EXPIMPLOGFILE
-	exit 23
+        echo "ERROR: import select error" >> "$EXPIMPLOGFILE"
+        exit 23
 fi
-clear 
-if [ $(cat $importtables | wc -l) -eq 0 ]
- then 
-	echo "ERROR: no exports selected for import" >> $EXPIMPLOGFILE
-	exit 24
+clear
+if [ "$(wc -l < "$importtables")" -eq 0 ]
+ then
+        echo "ERROR: no exports selected for import" >> "$EXPIMPLOGFILE"
+        exit 24
 fi
 
-if [ $OS == Linux ]
+if [ "$OS" == Linux ]
  then
-  export listcleaner=$EXPIMPLOC/listcleaner.conf
-  sed 's/\"//g' $importtables >> $listcleaner
-  mv $listcleaner $importtables
+  export listcleaner="$EXPIMPLOC/listcleaner.conf"
+  sed 's/\"//g' "$importtables" > "$listcleaner"
+  mv "$listcleaner" "$importtables"
 fi
 
 # export info file
-export importedtables=$EXPIMPLOC/imported_tables.conf
-[ -e $importedtables ] && rm $importedtables
+export importedtables="$EXPIMPLOC/imported_tables.conf"
+[ -e "$importedtables" ] && rm -f -- "$importedtables"
 
 # info file
-echo "# Template name | Return Code of Import" >> $importedtables
-echo "# =====================================" >> $importedtables
-echo "# Imported from:" >> $importedtables
-echo "# "$EXPIMPLOC >> $importedtables
-echo "# =====================================" >> $importedtables
+{
+  printf '# Template name | Return Code of Import\n'
+  printf '# =====================================\n'
+  printf '# Imported from:\n'
+  printf '# %s\n' "$EXPIMPLOC"
+  printf '# =====================================\n'
+} > "$importedtables"
 
-# import tables
-dialog --title "$global_title" --backtitle "$global_backtitle" --progressbox "Import selected tables"  $global_height $global_width < <(
-while read SELTABLES
-do
- echo "=== Import START" $SELTABLES "==="
- R3trans -w $EXPIMPLOC/$SELTABLES.imp.log -i $EXPIMPLOC/$SELTABLES.dat
- echo $SELTABLES"|RC="$? >> $importedtables
- echo "=== Import END" $SELTABLES "==="
- echo ""
- sleep 1
-done < $importtables
-if [ $? -ne 0 ]
- then
-	echo "ERROR: error while import" >> $EXPIMPLOGFILE
-	exit 25
-fi 
-echo "# =====================================" >> $importedtables
-clear
-)
+# prepare progress logging
+if command -v mktemp >/dev/null 2>&1; then
+  progress_log=$(mktemp "$EXPIMPLOC/import_progress.XXXXXX")
+else
+  progress_log="$EXPIMPLOC/import_progress_$$.log"
+fi
+: > "$progress_log"
+progress_pid=""
+cleanup_progress() {
+  if [ -n "$progress_pid" ]; then
+    kill "$progress_pid" 2>/dev/null
+    wait "$progress_pid" 2>/dev/null
+    progress_pid=""
+  fi
+  rm -f -- "$progress_log"
+}
+trap cleanup_progress EXIT
+(
+  trap 'exit 0' TERM
+  while true; do
+    tail -n +1 -f "$progress_log" | dialog --title "$global_title" --backtitle "$global_backtitle" --progressbox "Import selected tables"  $global_height $global_width
+    status=$?
+    if [ "$status" -eq 3 ]; then
+      continue
+    fi
+    break
+  done
+) &
+progress_pid=$!
+
+import_error=0
+while IFS= read -r SELTABLES
+ do
+  [ -z "$SELTABLES" ] && continue
+  printf '=== Import START %s ===\n' "$SELTABLES" >> "$progress_log"
+  R3trans -w "$EXPIMPLOC/$SELTABLES.imp.log" -i "$EXPIMPLOC/$SELTABLES.dat"
+  rc=$?
+  printf '%s|RC=%s\n' "$SELTABLES" "$rc" >> "$importedtables"
+  if [ "$rc" -ne 0 ] && [ "$rc" -ne 4 ]; then
+    import_error=1
+  fi
+  printf '=== Import END %s ===\n\n' "$SELTABLES" >> "$progress_log"
+  sleep 1
+ done < "$importtables"
+printf '# =====================================\n' >> "$importedtables"
+
+cleanup_progress
+trap - EXIT
 
 # logfile info
-echo "=== imported tables ===" >> $EXPIMPLOGFILE
-cat $importedtables >> $EXPIMPLOGFILE
-echo "=== imported tables ===" >> $EXPIMPLOGFILE
+echo "=== imported tables ===" >> "$EXPIMPLOGFILE"
+cat "$importedtables" >> "$EXPIMPLOGFILE"
+echo "=== imported tables ===" >> "$EXPIMPLOGFILE"
 
 # import info
-dialog --title "$global_title" --backtitle "$global_backtitle" --exit-label "Continue" --textbox $importedtables $global_height $global_width
-if [ $? -ne 0 ]
+if ! dialog --title "$global_title" --backtitle "$global_backtitle" --exit-label "Continue" --textbox "$importedtables" $global_height $global_width
  then
-	echo "ERROR: import info error" >> $EXPIMPLOGFILE
-	exit 26
-fi 
+        echo "ERROR: import info error" >> "$EXPIMPLOGFILE"
+        exit 26
+fi
 clear
 
-echo "=== import finished ===" >> $EXPIMPLOGFILE
+if [ "$import_error" -ne 0 ]; then
+  echo "ERROR: error while import" >> "$EXPIMPLOGFILE"
+  echo "=== import finished (with errors) ===" >> "$EXPIMPLOGFILE"
+  exit 25
+fi
+
+echo "=== import finished ===" >> "$EXPIMPLOGFILE"
 exit 0

@@ -18,6 +18,7 @@
 # Version 1.8.4 - Correction of OAC0 Template
 # Version 1.8.5 - OMIQ Template, Correction OAC0 Template
 # Version 1.8.6 - Correct OAC0 Template
+# Version 1.8.7 - Robust path handling and runtime checks
 
 ##### CONFIG EXPORT / IMPORT LOCATION #####
 export EXPIMPLOC=
@@ -50,6 +51,7 @@ export PARALLEL=0
 # general
 # 99 - you try to run as "root"
 # 98 - cannot find SAP SID
+# 95 - cannot find R3trans
 # 97 - cannot start dialog
 # 96 - Hit ESC
 # export
@@ -85,15 +87,15 @@ if [ -z "$EXPIMPLOC" ];
 else 
  export EXPIMPLOCINFO="EXPIMPLOC is set to"; 
 fi
-[ ! -d "$EXPIMPLOC" ] && mkdir -p $EXPIMPLOC
+[ ! -d "$EXPIMPLOC" ] && mkdir -p "$EXPIMPLOC"
 
 # set logfile
 export EXPIMPLOGFILE=$EXPIMPLOC/EXP_IMP_LOG_$(date "+%d_%m_%Y").txt
-echo $(date "+%d.%m.%Y-%H:%M") >> $EXPIMPLOGFILE
+printf '%s\n' "$(date "+%d.%m.%Y-%H:%M")" >> "$EXPIMPLOGFILE"
 
 # root check
 export CURUSER=$(whoami)
-if [ $CURUSER == "root" ];
+if [ "$CURUSER" == "root" ];
 then
 	echo "This script must not be run as root user!" 
 	echo "... EXIT NOW"
@@ -109,33 +111,41 @@ if [ -z "$SAPSYSTEMNAME" ];
 fi
 
 # PARALLEL check empty variable
-if [ -z "${PARALLEL}" ]; 
+if [ -z "${PARALLEL}" ];
  then
 	PARALLEL=0
 fi
 
 # check AIX and set PATH and LIBPATH to use linux dialog (build from dialog-1.2-20150225 with gcc-4.8.3-1.aix7.1 on AIX 7.1) on AIX
 export OS=$(uname)
-if [ $OS == AIX ]
+if [ "$OS" == AIX ]
 then
 export PATH=$PATH:$(pwd)/dialogaix/bin
 export LIBPATH=$LIBPATH:$(pwd)/dialogaix/lib
-chmod u+x $(pwd)/dialogaix/bin/dialog
+chmod u+x "$(pwd)/dialogaix/bin/dialog"
 fi
 
 # check if dialog is running
 dialog > /dev/null 2>&1
 export DIAGCHECK=$(echo $?)
-if [ $DIAGCHECK -ne 0 ];
+if [ "$DIAGCHECK" -ne 0 ];
  then
-	echo "cannot start linux 'dialog' command"
-	echo "... EXIT NOW"
-	exit 97
+        echo "cannot start linux 'dialog' command"
+        echo "... EXIT NOW"
+        exit 97
+fi
+
+# check if R3trans is available
+if ! command -v R3trans >/dev/null 2>&1;
+ then
+        echo "cannot find 'R3trans' command"
+        echo "... EXIT NOW"
+        exit 95
 fi
 
 # set executable to scripts
-chmod u+x $global_pwd/script/sap_export_tables.sh
-chmod u+x $global_pwd/script/sap_import_tables.sh
+chmod u+x "$global_pwd/script/sap_export_tables.sh"
+chmod u+x "$global_pwd/script/sap_import_tables.sh"
 
 # EXPORT or IMPORT dialog
 DIALOG=(dialog --title "$global_title" --backtitle "$global_backtitle"  --radiolist  "   _______   ___ \n  / __/ _ | / _ \ \n _\ \/ __ |/ ___/\n/___/_/ |_/_/    \n _________   ___  __   ____\n/_  __/ _ | / _ )/ /  / __/\n / / / __ |/ _  / /__/ _/  \n/_/ /_/ |_/____/____/___/  \n   _____  _____  ______  ______ \n  / __/ |/_/ _ \/  _/  |/  / _ \ \n / _/_>  </ ___// // /|_/ / ___/\n/___/_/|_/_/  /___/_/  /_/_/    \n\nEXPORT or IMPORT Tables?\n\nINFO: $EXPIMPLOCINFO\nINFO: $EXPIMPLOC \n\nCLIENT: $EXPCLIENT | PARALLEL: $PARALLEL\nOS: $OS | USER: $CURUSER | SAPSYSTEM: $SAPSYSTEMNAME\n\n                                $global_copy" $global_height $global_width 2)
@@ -155,7 +165,7 @@ do
     case $choice in
         EXPORT)
 			(
-			echo "Export SAP Tables" >> $EXPIMPLOGFILE
+                        echo "Export SAP Tables" >> "$EXPIMPLOGFILE"
 			# run export script
 			$global_pwd/script/sap_export_tables.sh
 			)
@@ -164,7 +174,7 @@ do
             ;;
         IMPORT)
 			(
-			echo "Import SAP Tables" >> $EXPIMPLOGFILE
+                        echo "Import SAP Tables" >> "$EXPIMPLOGFILE"
 			# run import script
 			$global_pwd/script/sap_import_tables.sh
 			)
